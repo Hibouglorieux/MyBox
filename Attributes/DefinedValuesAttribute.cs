@@ -85,8 +85,8 @@ namespace MyBox.Internal
 
 		private void Initialize(SerializedProperty targetProperty, DefinedValuesAttribute defaultValuesAttribute)
 		{
-			if (_initialized) return;
-			_initialized = true;
+			//if (_initialized) { return; }
+			//_initialized = true;
 
 			bUsesEnum = false;
 			

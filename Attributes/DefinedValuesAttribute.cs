@@ -53,6 +53,8 @@ namespace MyBox.Internal
 {
 	using UnityEditor;
 	using EditorTools;
+	using JetBrains.Annotations;
+	using Codice.CM.Common.Merge;
 
 	[CustomPropertyDrawer(typeof(DefinedValuesAttribute))]
 	public class DefinedValuesAttributeDrawer : PropertyDrawer
@@ -62,10 +64,31 @@ namespace MyBox.Internal
 		private Type _valueType;
 		private bool _initialized;
 
+		private bool bUsesEnum;
+		private Enum[] _enums;
+
+		class MethodReturnVal
+		{
+			public bool bIsObject;
+			public object[] objval;
+			public bool bIsEnum;
+			public Enum[] enumVal;
+			public Type enumType;
+			public bool NotNullOrEmpty()
+			{
+				if (bIsObject)
+					return objval.NotNullOrEmpty();
+				else
+					return true;
+			}
+		};
+
 		private void Initialize(SerializedProperty targetProperty, DefinedValuesAttribute defaultValuesAttribute)
 		{
 			if (_initialized) return;
 			_initialized = true;
+
+			bUsesEnum = false;
 			
 			var targetObject = targetProperty.serializedObject.targetObject;
 			
@@ -73,10 +96,21 @@ namespace MyBox.Internal
 			var labels = defaultValuesAttribute.LabelsArray;
 			var methodName = defaultValuesAttribute.UseMethod;
 
+			bool bIsEnum = false;
+			MethodReturnVal valuesFromMethod = null;
 			if (methodName.NotNullOrEmpty())
 			{
-				var valuesFromMethod = GetValuesFromMethod();
-				if (valuesFromMethod.NotNullOrEmpty()) values = valuesFromMethod;
+				valuesFromMethod = GetValuesFromMethod();
+				if (valuesFromMethod.NotNullOrEmpty())
+				{
+					if (valuesFromMethod.bIsObject)
+						values = valuesFromMethod.objval;
+					else
+					{
+						bIsEnum = true;
+						bUsesEnum = true;
+					}
+				}
 				else
 				{
 					WarningsPool.LogWarning(
@@ -85,18 +119,39 @@ namespace MyBox.Internal
 				}
 			}
 
-			var firstValue = values.FirstOrDefault(v => v != null);
-			if (firstValue == null) return;
-
-			_objects = values;
-			_valueType = firstValue.GetType();
-			
-			if (labels != null && labels.Length == values.Length) _labels = labels;
-			else _labels = values.Select(v => v?.ToString() ?? "NULL").ToArray();
-
-			
-			object[] GetValuesFromMethod()
+			if (bIsEnum)
 			{
+				_enums = valuesFromMethod.enumVal;
+				_valueType = valuesFromMethod.enumType;
+
+				if (labels != null && labels.Length == _enums.Length) _labels = labels;
+				else
+				{
+					_labels = new string[_enums.Length];
+					for (int i = 0; i < _enums.Length; i++)
+					{
+						_labels[i] = valuesFromMethod.enumType.GetEnumName(_enums[i]);
+					}
+				}
+			}
+			else
+			{
+
+				var firstValue = values.FirstOrDefault(v => v != null);
+				if (firstValue == null) return;
+
+				_objects = values;
+				_valueType = firstValue.GetType();
+
+				if (labels != null && labels.Length == values.Length) _labels = labels;
+				else _labels = values.Select(v => v?.ToString() ?? "NULL").ToArray();
+			}
+
+
+
+			MethodReturnVal GetValuesFromMethod()
+			{
+				MethodReturnVal returnVal = new MethodReturnVal();
 				var methodOwner = targetProperty.GetParent();
 				if (methodOwner == null) methodOwner = targetObject;
 				var type = methodOwner.GetType();
@@ -108,7 +163,27 @@ namespace MyBox.Internal
 				try
 				{
 					var result = method.Invoke(methodOwner, null);
-					return result as object[];
+					if (method.ReturnType.IsArray)
+					{
+						if (method.ReturnType.GetElementType().IsEnum)
+						{
+							returnVal.bIsEnum = true;
+							returnVal.enumType = method.ReturnType.GetElementType();
+
+							// real type
+							var intermediate = System.Convert.ChangeType(result, method.ReturnType);
+							// casted as array of int
+							int[] asInt = (int[])intermediate;
+							// casted to Enum
+							returnVal.enumVal = asInt.Cast<Enum>().ToArray();
+						}
+						else
+						{
+							returnVal.bIsObject = true;
+							returnVal.objval = result as object[];
+						}
+					}
+					return returnVal;
 				}
 				catch
 				{
@@ -122,7 +197,7 @@ namespace MyBox.Internal
 		public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
 		{
 			Initialize(property, (DefinedValuesAttribute)attribute);
-			
+
 			if (_labels.IsNullOrEmpty() || _valueType != fieldInfo.FieldType)
 			{
 				EditorGUI.PropertyField(position, property, label);
@@ -144,15 +219,26 @@ namespace MyBox.Internal
 			int GetSelectedIndex()
 			{
 				object value = null;
-				for (var i = 0; i < _objects.Length; i++)
+				if (!bUsesEnum)
 				{
-					if (isBool && property.boolValue == Convert.ToBoolean(_objects[i])) return i;
-					if (isString && property.stringValue == Convert.ToString(_objects[i])) return i;
-					if (isInt && property.intValue == Convert.ToInt32(_objects[i])) return i;
-					if (isFloat && Mathf.Approximately(property.floatValue, Convert.ToSingle(_objects[i]))) return i;
+					for (var i = 0; i < _objects.Length; i++)
+					{
+						if (isBool && property.boolValue == Convert.ToBoolean(_objects[i])) return i;
+						if (isString && property.stringValue == Convert.ToString(_objects[i])) return i;
+						if (isInt && property.intValue == Convert.ToInt32(_objects[i])) return i;
+						if (isFloat && Mathf.Approximately(property.floatValue, Convert.ToSingle(_objects[i]))) return i;
 
-					if (value == null) value = property.GetValue();
-					if (value == _objects[i]) return i;
+						if (value == null) value = property.GetValue();
+						if (value == _objects[i]) return i;
+					}
+				}
+				else
+				{
+					for (var i = 0; i < _enums.Length; i++)
+					{
+						if (property.intValue == Convert.ToInt32(_enums[i]))
+							return i;
+					}
 				}
 
 				return 0;
@@ -161,14 +247,21 @@ namespace MyBox.Internal
 			void ApplyNewValue(int newValueIndex)
 			{
 				var newValue = _objects[newValueIndex];
-				if (isBool) property.boolValue = Convert.ToBoolean(newValue);
-				else if (isString) property.stringValue = Convert.ToString(newValue);
-				else if (isInt) property.intValue = Convert.ToInt32(newValue);
-				else if (isFloat) property.floatValue = Convert.ToSingle(newValue);
+				if (!bUsesEnum)
+				{
+					if (isBool) property.boolValue = Convert.ToBoolean(newValue);
+					else if (isString) property.stringValue = Convert.ToString(newValue);
+					else if (isInt) property.intValue = Convert.ToInt32(newValue);
+					else if (isFloat) property.floatValue = Convert.ToSingle(newValue);
+					else
+					{
+						property.SetValue(newValue);
+						EditorUtility.SetDirty(property.serializedObject.targetObject);
+					}
+				}
 				else
 				{
-					property.SetValue(newValue);
-					EditorUtility.SetDirty(property.serializedObject.targetObject);
+					property.intValue = Convert.ToInt32(newValue);
 				}
 				
 				property.serializedObject.ApplyModifiedProperties();

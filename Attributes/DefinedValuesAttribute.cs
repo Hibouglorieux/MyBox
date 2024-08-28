@@ -246,9 +246,9 @@ namespace MyBox.Internal
 
 			void ApplyNewValue(int newValueIndex)
 			{
-				var newValue = _objects[newValueIndex];
 				if (!bUsesEnum)
 				{
+					var newValue = _objects[newValueIndex];
 					if (isBool) property.boolValue = Convert.ToBoolean(newValue);
 					else if (isString) property.stringValue = Convert.ToString(newValue);
 					else if (isInt) property.intValue = Convert.ToInt32(newValue);
@@ -261,6 +261,7 @@ namespace MyBox.Internal
 				}
 				else
 				{
+					var newValue = _enums[newValueIndex];
 					property.intValue = Convert.ToInt32(newValue);
 				}
 				

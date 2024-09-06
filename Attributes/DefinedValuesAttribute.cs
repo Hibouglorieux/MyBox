@@ -53,8 +53,6 @@ namespace MyBox.Internal
 {
 	using UnityEditor;
 	using EditorTools;
-	using JetBrains.Annotations;
-	using Codice.CM.Common.Merge;
 
 	[CustomPropertyDrawer(typeof(DefinedValuesAttribute))]
 	public class DefinedValuesAttributeDrawer : PropertyDrawer

@@ -168,10 +168,8 @@ namespace MyBox.Internal
 							returnVal.bIsEnum = true;
 							returnVal.enumType = method.ReturnType.GetElementType();
 
-							// real type
-							var intermediate = System.Convert.ChangeType(result, method.ReturnType);
 							// casted as array of int
-							int[] asInt = (int[])intermediate;
+							int[] asInt = (int[])result;
 							// casted to Enum
 							returnVal.enumVal = asInt.Cast<Enum>().ToArray();
 						}
